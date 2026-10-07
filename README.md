@@ -76,4 +76,17 @@ index.html?auto=1&night=5&seed=7&cam=lobby&mute=1
 
 `auto` 跳过开场 · `night=N` 跳到第 N 夜 · `seed=N` 固定随机种子 · `cam=` 直接切通道 ·
 `mute=1` 静音 · `norules=1` 关掉守则弹窗 · `probe=1` 状态浮层 ·
-`pose=wait:0` 摆姿势 · `mut=eyes-extra,hair-up` 强行叠加身体异常
+`pose=wait:0` 摆姿势 · `mut=eyes-extra,hair-up` 强行叠加身体异常 ·
+`flash=1` 开手电 · `decide=right|wrong` 直接判一次 · `finish=0|2` 直接看交班画面
+
+另有两份仅供调试的全局对象：`window.__dbg`（`state/errs/spawnNow/decide/switchCam/release/deny/set`）
+与 `window.__errs`（页面异常收集）。
+
+## 在线玩（GitHub Pages）
+
+本作是纯静态页面，推到 GitHub 之后可以直接开 Pages 玩：
+
+**Settings → Pages → Source: Deploy from a branch → Branch: `main` / `/ (root)` → Save**
+
+几分钟后地址是 `https://<你的用户名>.github.io/doorman/`，点开就能玩。
+（仓库必须是**公开**的，Pages 在私有仓库上需要付费版 GitHub。）
