@@ -84,9 +84,8 @@ index.html?auto=1&night=5&seed=7&cam=lobby&mute=1
 
 ## 在线玩（GitHub Pages）
 
-本作是纯静态页面，推到 GitHub 之后可以直接开 Pages 玩：
+本作是纯静态页面，直接在线玩：
 
-**Settings → Pages → Source: Deploy from a branch → Branch: `main` / `/ (root)` → Save**
+**https://bustling114.github.io/fluffy-computing-machine/**
 
-几分钟后地址是 `https://<你的用户名>.github.io/doorman/`，点开就能玩。
-（仓库必须是**公开**的，Pages 在私有仓库上需要付费版 GitHub。）
+（仓库是公开的，Pages 从 `main` 分支的根目录发布。）
