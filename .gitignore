@@ -1,0 +1,11 @@
+# Windows 资源管理器留下的缩略图缓存
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 开发期截图（几十张 PNG，留着占地方，游戏本体不需要）
+_shots/
+
+# 无头 Chrome 的临时用户目录
+chrome-profile*/

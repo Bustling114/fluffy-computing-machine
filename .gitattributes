@@ -1,0 +1,5 @@
+# 这个仓库只装少量文本文件，但 Windows 上的 Git 默认会把换行改来改去。
+# 统一成 LF，免得每次提交都出现整文件 diff。
+* text=auto eol=lf
+
+*.png binary
