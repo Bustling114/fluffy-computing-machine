@@ -60,9 +60,13 @@ for (let night = 1; night <= 9; night++) {
 
     /* 2. 假货必须要么被拦下，要么属于"守则还没启用"的后期破绽 */
     if (v.isBug && ev.verdict === 'allow') {
-      const docOnly = v.mutationIds.some(id => DOC_IDS.includes(id)) || v.mutationIds.includes('identity-mismatch');
+      // identity-mismatch 的抓手是肉眼可见的「证件照和本人对不上」，
+      // 由守则 6（strange）抓，所以它跟人身异常一样要等 strange 启用
+      const docOnly = v.mutationIds.some(id => DOC_IDS.includes(id));
       const needsShadow = v.mutationIds.some(id => ['shadow-flip', 'shadow-none', 'ghostly'].includes(id));
-      const needsStrange = v.mutationIds.some(id => PERSON_IDS.includes(id) && !['shadow-flip', 'shadow-none', 'ghostly'].includes(id));
+      const needsStrange = v.mutationIds.some(id =>
+        (PERSON_IDS.includes(id) && !['shadow-flip', 'shadow-none', 'ghostly'].includes(id)) ||
+        id === 'identity-mismatch');
       const late = (needsShadow && !active.includes('shadow')) || (needsStrange && !active.includes('strange'));
       if (late) { lateOnly++; nLeak++; }
       else if (docOnly && v.mutationIds.includes('doc-clean') && v.mutationIds.length === 1) {

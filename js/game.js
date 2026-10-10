@@ -47,10 +47,17 @@
     flagged: [],
     glitch: { next: 6, until: 0, cam: null },
     interior: [],           // 楼内正在行走的人
+    corridorFloor: 8,       // 楼层走廊这一路监控当前对着几楼（跟当前访客的目的楼层绑定）
+    watching: null,         // 玩家正在看的通道（给随机事件用）
+    events: [],             // 楼内随机事件日志（也在调试面板里显示）
     dead: false,
     won: false,
     tension: 0,
     time: 0,
+    // ── 调试用（tt 是时间倍率，tune 是交给 Visitors.buildNight 的概率覆盖）──
+    tt: 1,
+    tune: { bugRate: null, doubleRate: null, decoyRate: null },
+    dbg: { dirty: 0 },
   };
 
   /* ═══════════════════════════════════════════════════════
@@ -84,6 +91,15 @@
     btnIntro: $('btn-intro'),
     endModal: $('end-modal'), endTitle: $('end-title'), endBody: $('end-body'), btnEnd: $('btn-end'),
     scare: $('scare'), scareCanvas: $('scare-canvas'),
+    // 调试面板
+    dbgPanel: $('debug'), dbgClose: $('dbg-close'), dbgNight: $('dbg-night'),
+    dbgJump: $('dbg-jump'), dbgSpeed: $('dbg-speed'), dbgVisitor: $('dbg-visitor'),
+    dbgBug: $('dbg-bug'), dbgBugV: $('dbg-bug-v'),
+    dbgDbl: $('dbg-dbl'), dbgDblV: $('dbg-dbl-v'),
+    dbgDecoy: $('dbg-decoy'), dbgDecoyV: $('dbg-decoy-v'),
+    dbgEv: $('dbg-ev'), dbgEvRate: $('dbg-evrate'), dbgEvRateV: $('dbg-evrate-v'),
+    dbgEvLog: $('dbg-evlog'),
+    dbgScan: $('dbg-scan'), dbgVig: $('dbg-vig'), dbgNoise: $('dbg-noise'),
   };
 
   /* ═══════════════════════════════════════════════════════
@@ -117,9 +133,19 @@
     startNight(1);
   }
 
+  /* 把调试面板里的概率覆盖整理成 buildNight 能吃的形状（null 表示"用默认"） */
+  function tuneOpts() {
+    const o = {};
+    const t = S.tune || {};
+    if (typeof t.bugRate === 'number') o.bugRate = t.bugRate;
+    if (typeof t.doubleRate === 'number') o.doubleRate = t.doubleRate;
+    if (typeof t.decoyRate === 'number') o.decoyRate = t.decoyRate;
+    return o;
+  }
+
   function startNight(night) {
     S.night = night;
-    const built = Visitors.buildNight(night);
+    const built = Visitors.buildNight(night, tuneOpts());
     S.queue = built.queue;
     S.total = built.queue.length;
     S.spawned = 0;
@@ -140,6 +166,10 @@
     S.readFlags = {};
     S.nextArrival = 3.2;
     S.idShownFor = null;
+    S.corridorFloor = 8;
+    S.events = [];
+
+    Events.setNight(night);
 
     Registry.setNightNotes(built.flagged, built.vacancies);
 
@@ -227,6 +257,23 @@
      访客到达
      ═══════════════════════════════════════════════════════ */
 
+  /* 每个人的"走法"和"站法"都不一样。
+     由访客序号派生，所以同一位访客每次看都是同一个姿态。 */
+  function makeGait(seq) {
+    let s = ((seq * 2246822519) ^ 0x5bf03635) >>> 0 || 1;
+    const nx = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    return {
+      dur: 2.6 + nx() * 1.6,        // 走完这段路要几秒
+      cad: 6.2 + nx() * 3.4,        // 步频
+      amp: 0.42 + nx() * 0.4,       // 步幅
+      entrySc: 0.86 + nx() * 0.16,  // 从远处过来的起始大小
+      idleAmp: 0.006 + nx() * 0.018,// 站着时的轻微晃动
+      idleSpd: 0.8 + nx() * 1.2,    // 晃动快慢
+      shift: nx() * 2 - 1,          // 站位左右偏一点
+      lurk: nx() < 0.22,            // 少数人会往前多凑半步
+    };
+  }
+
   function spawnVisitor() {
     if (S.spawned >= S.queue.length) return;
     const v = S.queue[S.spawned++];
@@ -235,12 +282,21 @@
     v.leaned = false;
     v.leanT = 0;
     v.bored = 0;
+    v.gait = makeGait(v.seq);
     v.targetFloor = Visitors.R.chance(0.5) ? v.room.slice(0, 2) : String(Visitors.R.int(3, 18)).padStart(2, '0');
     if (v.isBug && Visitors.R.chance(0.6)) {
       // 假货多半会去错楼层
       v.targetFloor = String(Visitors.R.int(3, 18)).padStart(2, '0');
     }
+    // 封存楼层不能是"上门服务"的目的地——否则第 5 条守则自相矛盾
+    if ((v.kind === 'worker' || v.kind === 'newtenant') && S.flagged.length) {
+      const banned = {};
+      S.flagged.forEach(r => { banned[String(r).slice(0, 2)] = true; });
+      if (banned[v.targetFloor]) v.targetFloor = pickOpenFloor(banned);
+    }
     S.visitor = v;
+    S.corridorFloor = v.targetFloor;   // 走廊画面跟着当前访客要去的那一层
+    markActiveCam();
 
     SFX.doorbell();
     D.prompt.textContent = '门铃响了。有人站在单元门外。';
@@ -250,6 +306,15 @@
     if (S.cam !== 'gate') {
       D.camButtons.querySelector('[data-cam="gate"]')?.classList.add('alert');
     }
+  }
+
+  function pickOpenFloor(banned) {
+    const pool = [];
+    for (let f = 3; f <= 18; f++) {
+      const s = String(f).padStart(2, '0');
+      if (!banned[s]) pool.push(s);
+    }
+    return pool.length ? Visitors.R.pick(pool) : '08';
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -281,6 +346,13 @@
     else S.mistakes++;
 
     S.history.push({ room: v.room, name: v.name, letIn, correct });
+
+    // 调试计分板：按"事实"记，不按规则判的
+    DBG.score.seen++;
+    if (correct) DBG.score.right++;
+    else if (letIn) DBG.score.wrongAllow++;
+    else DBG.score.wrongDeny++;
+    saveScore();
 
     D.statMistake.textContent = S.mistakes;
 
@@ -331,41 +403,108 @@
      门内行走（放行后追踪）
      ═══════════════════════════════════════════════════════ */
 
+  /* ── 楼内路径：进楼 → 走到电梯 → 电梯上到目的楼层 → 出电梯 → 走到自己那扇门 ──
+     把人真的送完，而不是一进电梯就凭空蒸发。 */
+
+  const DOOR_X = { '01': 13, '02': 28, '03': 132, '04': 158 };
+
   function pushInterior(v) {
+    const doorNo = String(v.room).slice(2, 4);
     S.interior.push({
       v,
-      x: 95, z: 0,
-      target: 1,
-      speed: 0.14,
+      stage: 'walkin',        // walkin | lobby-wait | ride | walkout
+      z: 0,
+      doorX: DOOR_X[doorNo] || 132,
+      reachedDoor: false,
+      gone: false,
       done: false,
+      knocked: false,
     });
+  }
+
+  function removeInterior(p) {
+    const i = S.interior.indexOf(p);
+    if (i >= 0) S.interior.splice(i, 1);
   }
 
   function updateInterior(dt) {
-    S.interior.forEach(p => {
-      if (p.done) {
-        if (p.v && !p.knocked) {
-          p.knocked = true;
-          p.knockAt = S.time + 2 + Math.random() * 2;
+    S.interior.slice().forEach(p => {
+      if (p.done) { removeInterior(p); return; }
+
+      switch (p.stage) {
+        case 'walkin': {
+          // 一层门厅：从大门口走向电梯
+          const step = 0.20 * dt;
+          p.z = Math.min(1, p.z + step);
+          if (p.z >= 1) {
+            p.stage = 'lobby-wait';
+            p.wait = 0.7 + Math.random() * 1.4;   // 在电梯前站一会儿
+          }
+          break;
         }
-        return;
+        case 'lobby-wait': {
+          p.wait -= dt;
+          if (p.wait <= 0) {
+            p.stage = 'ride';
+            p.wait = 1.5 + Math.random() * 1.3;   // 电梯上行（楼梯间摄像头这时能看到动静）
+            SFX.elevatorRun();
+          }
+          break;
+        }
+        case 'ride': {
+          p.wait -= dt;
+          if (p.wait <= 0) {
+            p.stage = 'walkout';
+            p.z = 0;
+            // 电梯停在某人要去的那一层 —— 走廊那台摄像机的楼层牌也跟着变
+            S.corridorFloor = p.v.targetFloor || S.corridorFloor;
+            markActiveCam();
+            SFX.elevatorArrive();
+            // 到了自己那层，顺手敲一下对讲
+            if (!p.knocked) {
+              p.knocked = true;
+              p.knockAt = S.time + 1.2 + Math.random() * 2;
+            }
+          }
+          break;
+        }
+        case 'walkout': {
+          // 楼层走廊：从电梯口走向自己那扇门
+          const step = 0.16 * dt;
+          p.z = Math.min(1, p.z + step);
+          if (p.z >= 1 && !p.reachedDoor) {
+            p.reachedDoor = true;
+            p.doneAt = S.time + 0.5 + Math.random() * 0.9;
+            SFX.lockClick();
+          }
+          if (p.reachedDoor && S.time > p.doneAt) p.done = true;
+          break;
+        }
       }
-      const dx = p.target - p.z;
-      const step = p.speed * dt;
-      if (Math.abs(dx) <= step) { p.z = p.target; p.done = true; }
-      else p.z += Math.sign(dx) * step;
     });
   }
 
-  // 正在门厅 / 楼上走廊里走动的人，按摄像机求屏幕坐标
+  // 楼内的人按摄像机求屏幕坐标。阶段不对就返回 null（那台摄像机此刻照不到他）
   function interiorPos(p, cam) {
     const z = clamp(p.z, 0, 1);
     if (cam === 'lobby') {
+      // 大门口 → 电梯口
+      if (p.stage !== 'walkin' && p.stage !== 'lobby-wait' && p.stage !== 'ride') return null;
       return { x: lerp(95, 70, z), y: lerp(86, 70, z), scale: lerp(1.05, 0.52, z), facing: -1 };
     }
+    if (cam === 'stair') {
+      // 电梯井上的指示灯：只在 ride 阶段能看到厢体在动
+      return null;
+    }
     if (cam === 'lobby2') {
-      // 出电梯（左，远）→ 走到自己那扇门（右，近）；高度受限，不能顶穿天花板
-      return { x: lerp(70, 116, z), y: lerp(83, 85, z), scale: lerp(0.62, 0.76, z), facing: 1 };
+      if (p.stage !== 'walkout') return null;
+      // 出电梯（左，远）→ 走到自己那扇门；高度受限，不能顶穿天花板
+      return {
+        x: lerp(62, p.doorX, z),
+        y: lerp(83, 86, z),
+        scale: lerp(0.60, 0.80, z),
+        facing: p.doorX >= 62 ? 1 : -1,
+      };
     }
     return null;
   }
@@ -486,7 +625,10 @@
       b.classList.toggle('active', b.dataset.cam === S.cam);
     });
     const c = CAMS.find(x => x.id === S.cam);
-    D.camName.textContent = c ? c.name : '—';
+    let label = c ? c.name : '—';
+    // 走廊那一路是装在具体某一层的，标签上写清楚是哪一层
+    if (S.cam === 'lobby2') label += ' ' + (S.corridorFloor || 8) + 'F';
+    D.camName.textContent = label;
   }
 
   function switchCam(id) {
@@ -653,7 +795,7 @@
 
   function loop(now) {
     requestAnimationFrame(loop);
-    const dt = Math.min(0.05, ((now - last) / 1000) * timeScale);
+    const dt = Math.min(0.05, ((now - last) / 1000) * timeScale * S.tt);
     last = now;
     frames++;
     if (probeEl) realElapsed = now - pageStart;
@@ -662,6 +804,7 @@
     renderView(dt);
     renderOverlays(dt);
     updateProbe();
+    updateDebug();
   }
 
   /* ─── 仅供调试：?probe=1 时把内部状态画到屏上，方便截图核对 ─── */
@@ -696,6 +839,16 @@
 
     updateInterior(dt);
 
+    // 楼内随机事件（只做氛围，不参与判定）
+    Events.step(dt, S, { SFX });
+    // 哪一路有动静，就在那个通道按钮上亮个小点
+    D.camButtons.querySelectorAll('.cam-btn').forEach(b => {
+      const id = b.dataset.cam;
+      const on = id !== S.cam && Events.hasGlow(id);
+      if (on) b.classList.add('alert');
+      else if (S.cam !== id) b.classList.remove('alert');
+    });
+
     const v = S.visitor;
 
     /* 访客状态机 */
@@ -703,7 +856,7 @@
       v.phase += dt;
       switch (v.mood) {
         case 'approach':
-          if (v.phase > 3.4) { v.mood = 'wait'; v.phase = 0; }
+          if (v.phase > (v.gait ? v.gait.dur : 3.4)) { v.mood = 'wait'; v.phase = 0; }
           break;
 
         case 'wait':
@@ -796,11 +949,19 @@
 
     /* 楼道提示 */
     const insideLobby = S.interior.filter(p => !p.done);
-    if (insideLobby.length && S.cam === 'lobby' && !D.prompt.dataset.lock) {
+    if (insideLobby.length && !D.prompt.dataset.lock) {
       const p = insideLobby[0];
-      if (p.z > 0.25 && p.v.decided && p.v.letIn) {
+      const atFloor = S.corridorFloor + ' 楼';
+      if (S.cam === 'lobby' && (p.stage === 'walkin' || p.stage === 'lobby-wait')) {
         D.prompt.textContent = '他进了门厅，正往电梯走。';
         D.promptSub.textContent = '看他按哪一层。';
+      } else if (S.cam === 'stair' && p.stage === 'ride') {
+        D.prompt.textContent = '电梯正在上行，厢体从楼梯间这侧经过。';
+        D.promptSub.textContent = '监控里看不到人。';
+        D.prompt.className = 'noise';
+      } else if (S.cam === 'lobby2' && p.stage === 'walkout') {
+        D.prompt.textContent = '他出电梯了，正走向 ' + p.v.room + ' 号门。';
+        D.promptSub.textContent = '这是 ' + atFloor + '。';
       }
     }
   }
@@ -811,23 +972,25 @@
 
   function gatePersonPos(v) {
     let x = 95, sc = 1.15, walk = 0, facing = -1;
+    const g = v.gait || (v.gait = makeGait(v.seq));
+    const stand = 95 + g.shift * 3 + (g.lurk ? 3 : 0);
 
     if (v.mood === 'approach') {
-      const t = ease(clamp(v.phase / 3.4, 0, 1));
-      x = lerp(148, 95, t);
-      sc = lerp(0.92, 1.15, t);
-      walk = Math.sin(v.phase * 8) * 0.6;
+      const t = ease(clamp(v.phase / g.dur, 0, 1));
+      x = lerp(148, stand, t);
+      sc = lerp(g.entrySc, 1.15, t);
+      walk = Math.sin(v.phase * g.cad) * g.amp;
       facing = -1;
     } else if (v.mood === 'wait') {
-      x = 95;
+      x = stand;
       sc = v.leaned ? lerp(1.15, 1.85, clamp((v.leanT - 3.2) / 2.5, 0, 1))
-                    : 1.15 + Math.sin(S.time * 1.4) * 0.012;
-      walk = 0;
+                    : 1.15 + Math.sin(S.time * g.idleSpd) * g.idleAmp;
+      walk = Math.sin(S.time * g.idleSpd * 0.7) * 0.05;   // 站不住，轻微换脚
       facing = -1;
     } else if (v.mood === 'leaving') {
-      x = lerp(95, 148, ease(clamp(v.phase / 4, 0, 1)));
+      x = lerp(stand, 148, ease(clamp(v.phase / 4, 0, 1)));
       sc = lerp(1.15, 0.9, clamp(v.phase / 4, 0, 1));
-      walk = Math.sin(v.phase * 7) * 0.6;
+      walk = Math.sin(v.phase * g.cad * 0.9) * g.amp;
       facing = 1;
     }
     return { x, y: 78, sc, walk, facing };
@@ -852,6 +1015,15 @@
       });
     }
 
+    // 有人在电梯里时，楼梯间的井道窗口能看到厢体上行
+    let elevator = 0;
+    S.interior.forEach(p => {
+      if (p.stage === 'ride') {
+        const total = 1.5 + 1.3;
+        elevator = Math.max(elevator, clamp(1 - p.wait / total, 0, 1));
+      }
+    });
+
     if (S.cam === 'stair') {
       // 楼梯间的"东西"：偶发
       const seed = Math.sin(S.time * 0.31) * Math.sin(S.time * 0.07);
@@ -860,14 +1032,30 @@
       }
     }
 
+    // 楼内随机事件里"出现一个身影"的那几种（楼梯间/走廊/门厅）
+    Events.renderPeople(S, people, S.cam);
+
+    const vfx = Events.visual(S.cam);
+    if (window.__vfx) {
+      // ?vfx=... 强制开启，供截图核对
+      Object.keys(window.__vfx).forEach(k => { if (k !== 'tint-cold' && k !== 'tint-red') vfx[k] = true; });
+    }
+    vfx.time = S.time;
+    vfx.elevatorAt = parseInt(S.corridorFloor, 10) || 1;
+
     Cameras.render({
       cam: S.cam,
       people,
-      targetFloor: v ? v.targetFloor : 8,
-      showFloor: null,
+      targetFloor: S.corridorFloor,
+      showFloor: S.corridorFloor,
+      elevator,
+      visual: vfx,
       flashlight: S.flashlight,
       shake: S.dead ? 0.6 : 0,
       overlay: (S.glitch.cam === S.cam && S.time < S.glitch.until) ? 'glitch' : 'none',
+      tint: (window.__vfx && (window.__vfx['tint-cold'] || window.__vfx['tint-red']))
+        ? (window.__vfx['tint-red'] ? 'rgba(150,30,30,0.11)' : 'rgba(70,120,180,0.10)')
+        : Events.tint(S.cam),
     }, dt);
 
     // 直播状态
@@ -947,6 +1135,247 @@
   }
 
   /* ═══════════════════════════════════════════════════════
+     调试面板
+     ──────────────────────────────────────────────────────
+     F1 或 ~ 开关。正常游玩时它是关着的，也不吃键盘。
+     面板里所有"改概率"的项只作用于**下一夜**的队列生成
+     （已经排好的队伍不会中途换人，否则会破坏公平性）。
+     ═══════════════════════════════════════════════════════ */
+
+  const SCORE_KEY = 'doorman.debug.score';
+
+  const DBG = {
+    open: false,
+    reveal: false,
+    score: { runs: 0, seen: 0, wrongAllow: 0, wrongDeny: 0, right: 0 },
+    lastVisitorId: null,
+    autoLeft: 0,
+    autoTimer: 0,
+  };
+
+  function loadScore() {
+    try {
+      const raw = sessionStorage.getItem(SCORE_KEY);
+      if (raw) DBG.score = Object.assign(DBG.score, JSON.parse(raw));
+    } catch (e) { /* 无痕模式之类，忽略 */ }
+  }
+  function saveScore() {
+    try { sessionStorage.setItem(SCORE_KEY, JSON.stringify(DBG.score)); } catch (e) {}
+  }
+
+  function dbgOn(on) {
+    DBG.open = !!on;
+    D.dbgPanel.classList.toggle('hidden', !DBG.open);
+    if (DBG.open) debugRender();
+  }
+
+  function debugBuildJump() {
+    if (!D.dbgJump) return;
+    let html = '';
+    for (let n = 1; n <= 12; n++) {
+      html += '<button data-dbg="jump" data-v="' + n + '" type="button">' + n + '</button>';
+    }
+    D.dbgJump.innerHTML = html;
+  }
+
+  function debugAct(btn) {
+    const a = btn.dataset.dbg;
+    const val = btn.dataset.v;
+
+    switch (a) {
+      case 'jump': {
+        const n = parseInt(val, 10);
+        if (n) { hide(D.endModal); hide(D.rulesModal); hide(D.introModal); startNight(n); }
+        break;
+      }
+      case 'skip':
+        hide(D.rulesModal);
+        finishNight();
+        break;
+      case 'restart':
+        hide(D.endModal); hide(D.rulesModal);
+        SFX.stopAmbience();
+        startGame();
+        break;
+      case 'speed': {
+        S.tt = parseFloat(val) || 1;
+        D.dbgSpeed.textContent = S.tt + '×';
+        break;
+      }
+      case 'pause':
+        S.paused = !S.paused;
+        btn.classList.toggle('on', S.paused);
+        break;
+      case 'spawn':
+        S.paused = false;
+        S.nextArrival = 0;
+        if (!S.visitor) spawnVisitor();
+        break;
+      case 'let':
+        decide(true);
+        break;
+      case 'deny':
+        decide(false);
+        break;
+      case 'autolevel':
+        DBG.autoLeft = 10;
+        DBG.autoTimer = 0;
+        S.paused = false;
+        btn.classList.add('on');
+        break;
+      case 'reveal':
+        DBG.reveal = !DBG.reveal;
+        btn.classList.toggle('on', DBG.reveal);
+        break;
+      case 'evtoggle':
+        Events.setEnabled(!Events.enabled);
+        btn.classList.toggle('on', !Events.enabled);
+        syncEvents();
+        break;
+      case 'evnow':
+        Events.fireNow(S, { SFX });
+        syncEvents();
+        break;
+      case 'score-reset':
+        DBG.score = { runs: 0, seen: 0, wrongAllow: 0, wrongDeny: 0, right: 0 };
+        saveScore();
+        break;
+    }
+    debugRender();
+  }
+
+  function bindDebug() {
+    if (!D.dbgPanel) return;
+    debugBuildJump();
+    loadScore();
+
+    D.dbgPanel.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-dbg]');
+      if (btn) { debugAct(btn); return; }
+      if (e.target === D.dbgClose) dbgOn(false);
+    });
+    D.dbgClose.addEventListener('click', () => dbgOn(false));
+
+    const slider = (el, apply) => {
+      if (!el) return;
+      el.addEventListener('input', () => { apply(parseFloat(el.value)); debugRender(); });
+    };
+    slider(D.dbgBug, v => { S.tune.bugRate = v; });
+    slider(D.dbgDbl, v => { S.tune.doubleRate = v; });
+    slider(D.dbgDecoy, v => { S.tune.decoyRate = v; });
+    slider(D.dbgEvRate, v => { Events.setGap(v); syncEvents(); });
+    slider(D.dbgScan, v => D.screen.parentElement.style.setProperty('--scanline-op', v));
+    slider(D.dbgVig, v => D.screen.parentElement.style.setProperty('--vignette-op', v));
+    slider(D.dbgNoise, v => D.screen.parentElement.style.setProperty('--noise-op', v));
+
+    // 滑块的初值跟当前规则对上
+    if (D.dbgBug) { D.dbgBug.value = defaultBugRate(S.night); S.tune.bugRate = parseFloat(D.dbgBug.value); }
+    if (D.dbgDbl) { D.dbgDbl.value = S.night >= 4 ? 0.22 : 0; S.tune.doubleRate = parseFloat(D.dbgDbl.value); }
+    if (D.dbgDecoy) { D.dbgDecoy.value = 0.34; S.tune.decoyRate = 0.34; }
+
+    window.addEventListener('keydown', e => {
+      const k = e.key;
+      if (k === 'F1' || k === '`' || k === '~') {
+        e.preventDefault();
+        dbgOn(!DBG.open);
+      } else if (k === 'Escape' && DBG.open) {
+        dbgOn(false);
+      }
+    }, true);
+  }
+
+  function defaultBugRate(night) { return Math.min(0.34 + night * 0.05, 0.62).toFixed(2); }
+
+  /* 面板里那些"只要有变化就该跟着动"的读数 */
+  function updateDebug() {
+    if (!DBG.open) return;
+
+    // 自动判定：每 1.1 秒判一次
+    if (DBG.autoLeft > 0) {
+      DBG.autoTimer -= 1 / 60;
+      if (DBG.autoTimer <= 0) {
+        DBG.autoTimer = 1.1;
+        DBG.autoLeft--;
+        if (!S.visitor) { S.paused = false; S.nextArrival = 0; spawnVisitor(); }
+        else if (S.visitor.mood === 'wait') {
+          const ev = currentEvaluation();
+          if (ev) decide(ev.verdict === 'allow');
+        }
+        if (DBG.autoLeft <= 0) {
+          const b = D.dbgPanel.querySelector('[data-dbg="autolevel"]');
+          if (b) b.classList.remove('on');
+        }
+      }
+    }
+
+    // 每帧都刷会闪，隔几帧刷一次
+    S.dbg = S.dbg || { dirty: 0 };
+    S.dbg.dirty++;
+    if (S.dbg.dirty % 12 === 0) debugRender();
+  }
+
+  function debugRender() {
+    if (!D.dbgPanel || !DBG.open) return;
+
+    if (D.dbgNight) D.dbgNight.textContent = '第 ' + S.night + ' 夜';
+    if (D.dbgSpeed) D.dbgSpeed.textContent = S.tt + '×';
+    if (D.dbgBugV) D.dbgBugV.textContent = (S.tune.bugRate === null ? '默认' : S.tune.bugRate.toFixed(2));
+    if (D.dbgDblV) D.dbgDblV.textContent = (S.tune.doubleRate === null ? '默认' : S.tune.doubleRate.toFixed(2));
+    if (D.dbgDecoyV) D.dbgDecoyV.textContent = (S.tune.decoyRate === null ? '默认' : S.tune.decoyRate.toFixed(2));
+
+    /* 访客 */
+    if (D.dbgVisitor) {
+      const v = S.visitor;
+      if (!v) {
+        D.dbgVisitor.innerHTML = '<span class="k">门口没有人。</span>' +
+          '\n队列 ' + S.spawned + '/' + S.total + '   下一班 ' + Math.max(0, S.nextArrival).toFixed(1) + 's' +
+          '\n楼内 ' + S.interior.length + ' 人   走廊 ' + S.corridorFloor + 'F';
+      } else {
+        const ev = currentEvaluation();
+        const real = ev ? ev.verdict : '?';
+        const wrongWay = v.isBug ? '拒收' : '放行';
+        let t = '';
+        t += '<b>' + v.name + '</b>  <span class="k">' + v.room + '  ' + v.kind + '</span>\n';
+        t += '<span class="k">真身 </span>' +
+             (v.isBug ? '<span class="bad">假货（该拒）</span>' : '<span class="good">真人（该放）</span>');
+        if (v.mustReject) t += ' <span class="bad">[必拒]</span>';
+        t += '\n<span class="k">规则判 </span>' + real + '   <span class="k">正确做法 </span>' + wrongWay + '\n';
+        if (DBG.reveal) {
+          t += '<span class="k">事件   </span>' + (v.mutationIds.join(', ') || '无') + '\n';
+          t += '<span class="k">诱饵   </span>' + (v.decoyIds.join(', ') || '无') + '\n';
+          t += '<span class="k">涂改   </span>' + (v.tamperFields.join(', ') || '无') +
+               (v.hardForgery ? ' <span class="bad">(重印)</span>' : '') + '\n';
+          t += '<span class="k">破绽   </span>' + (v.tells.map(x => x.text).join(' / ') || '（无）');
+        } else {
+          t += '<span class="k">（点"揭示真身"看突变/诱饵/破绽）</span>';
+        }
+        D.dbgVisitor.innerHTML = t;
+      }
+    }
+
+    /* 事件 */
+    if (D.dbgEvLog) {
+      const log = Events.log;
+      D.dbgEvLog.innerHTML = log.length
+        ? log.slice(0, 14).map(x => '<span class="k">' + fmtClock(NIGHT_CLOCK_START + Math.floor(x.t * 3)) + '</span> ' + x.text).join('\n')
+        : '<span class="k">（还没有事件）</span>';
+    }
+    syncEvents();
+  }
+
+  function syncEvents() {
+    if (D.dbgEv) {
+      D.dbgEv.textContent = (Events.enabled ? '开' : '关') +
+        ' · 下一个 ' + Math.max(0, Events.nextIn).toFixed(0) + 's' +
+        ' · 生效 ' + Events.active.length;
+    }
+    if (D.dbgEvRate) {
+      D.dbgEvRate.value = Events.baseGap;
+      D.dbgEvRateV.textContent = Events.baseGap.toFixed(0) + 's';
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════
      启动
      ═══════════════════════════════════════════════════════ */
 
@@ -955,6 +1384,7 @@
     buildNoiseFrames();
     buildCamButtons();
     bindInput();
+    bindDebug();
 
     D.introTitle.textContent = '夜班 · 门房';
     D.introBody.innerHTML = '' +
@@ -1069,6 +1499,26 @@
         poseVisitor(mood, phase);
       }
 
+      // ?face=ponytail,beard —— 截图核对用：强改当前访客的发型与附加特征
+      if (q.has('face') && S.visitor) {
+        const parts = (q.get('face') || '').split(',');
+        parts.forEach(function (x) {
+          if (!x) return;
+          if (Visitors.HAIRSTYLE_IDS && Visitors.HAIRSTYLE_IDS.indexOf(x) >= 0) {
+            S.visitor.outer.hairStyle = x; S.visitor.photo.hairStyle = x;
+          } else {
+            S.visitor.outer.extra = x; S.visitor.photo.extra = x;
+          }
+        });
+      }
+
+      // 截图核对用：?vfx=flicker,ajar,exitPulse,elevatorDoor,intercom,windowOut,tint-cold,tint-red
+      // 把这些画面级随机事件强制常开，便于逐项目视确认
+      if (q.has('vfx')) {
+        window.__vfx = {};
+        (q.get('vfx') || '').split(',').forEach(function (x) { if (x) window.__vfx[x] = true; });
+      }
+
       // 截图用：?decide=wrong / ?decide=right —— 直接判一次，用来看结果画面
       if (q.has('decide')) {
         spawnVisitor();
@@ -1087,6 +1537,9 @@
         S.mistakes = parseFloat(q.get('finish')) || 0;
         finishNight();
       }
+
+      // ?debug=1 一开局就把调试面板摊开
+      if (q.has('debug')) dbgOn(true);
     }
 
     requestAnimationFrame(loop);

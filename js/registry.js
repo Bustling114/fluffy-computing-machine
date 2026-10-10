@@ -228,6 +228,7 @@ const Registry = (() => {
         case 'strange': {
           const a = v.outer;
           const flags = [];
+          if (a.idMismatch) flags.push('证件照和本人对不上');
           if (a.extraEyes > 0) flags.push('多出的眼睛');
           if (a.extraMouth) flags.push('多出的嘴');
           if (a.headTurn) flags.push('颈部角度异常');

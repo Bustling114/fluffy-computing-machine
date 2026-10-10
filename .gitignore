@@ -9,3 +9,6 @@ _shots/
 
 # 无头 Chrome 的临时用户目录
 chrome-profile*/
+
+# 提交信息草稿（PowerShell 里没法直接传多行中文，只能写文件再 -F）
+_commitmsg.txt

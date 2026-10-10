@@ -24,6 +24,8 @@ const Cameras = (() => {
   const CEIL = '#12161b', METAL = '#39414b', METAL_D = '#242a32';
   const LIGHT = '#ffe9b0', DOOR = '#3a2b23', DOOR_D = '#2a1f19';
 
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
   let ctx = null;
   let time = 0;
   let glitchCanvas = null;
@@ -293,10 +295,40 @@ const Cameras = (() => {
       ctx.beginPath();
       ctx.arc(cx, cy - r * 1.5, r * 0.5, 0, Math.PI * 2);
       ctx.fill();
-    } else { // messy
+    } else if (a.hairStyle === 'messy') {
       ctx.fillRect(cx - r * 1.05, cy - r * 1.1, r * 2.1, r * 0.72);
       px(cx - r * 1.1, cy - r * 1.45, col, Math.round(r * 0.6));
       px(cx + r * 0.6, cy - r * 1.5, col, Math.round(r * 0.6));
+    } else if (a.hairStyle === 'ponytail') {
+      // 中分 + 脑后一束
+      ctx.fillRect(cx - r * 1.0, cy - r * 1.14, r * 2.0, r * 0.8);
+      ctx.fillRect(cx - facing * r * 1.12, cy - r * 0.7, r * 0.42, r * 2.0);
+      ctx.beginPath();
+      ctx.ellipse(cx - facing * r * 1.5, cy + r * 0.55, r * 0.34, r * 0.68, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (a.hairStyle === 'braid') {
+      // 辫子：贴着头侧往下串的一列小方块（比 ponytail 更靠后、更长）
+      ctx.fillRect(cx - r * 1.02, cy - r * 1.12, r * 2.04, r * 0.78);
+      const bx = cx - facing * r * 1.34;
+      for (let i = 0; i < 5; i++) {
+        px(bx, cy - r * 0.75 + i * r * 0.52, col, Math.round(r * 0.46));
+      }
+      px(bx, cy + r * 1.85, shade(col, -0.2), Math.round(r * 0.3));
+    } else if (a.hairStyle === 'cap') {
+      // 平头／戴帽子：圆顶压得很低，前面再压一道帽檐
+      ctx.fillRect(cx - r * 1.0, cy - r * 1.1, r * 2.0, r * 0.62);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - r * 1.0, r * 1.06, r * 0.54, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+      const brimX = facing > 0 ? cx + r * 0.4 : cx - r * 1.45;
+      ctx.fillRect(brimX, cy - r * 1.02, r * 1.05, Math.max(1, r * 0.3));
+    } else if (a.hairStyle === 'receding') {
+      // 发际线后退：两侧留一点，头顶空着
+      ctx.fillRect(cx - r * 1.0, cy - r * 1.02, r * 0.5, r * 0.66);
+      ctx.fillRect(cx + r * 0.5, cy - r * 1.02, r * 0.5, r * 0.66);
+      ctx.fillRect(cx - r * 0.62, cy - r * 0.86, r * 1.24, r * 0.24);
+    } else { // short（兜底）
+      ctx.fillRect(cx - r * 0.98, cy - r * 1.12, r * 1.96, r * 0.78);
     }
   }
 
@@ -350,6 +382,58 @@ const Cameras = (() => {
     if (p.wet) {
       ctx.fillStyle = 'rgba(120,160,190,0.18)';
       ctx.fillRect(fx - 5 * scale, fy - 30 * scale * (a.hScale || 1), 10 * scale, 30 * scale * (a.hScale || 1));
+    }
+
+    /* ── 五官／衣着上的中性差异 ──
+       这些**不是破绽**（守则 6 只看 extraEyes / extraMouth / headTurn /
+       inkEyes / limbHack / collarStain / ghostly / flicker / hairRise /
+       体型比例），所以刻意画成"一眼正常"的样子，绝不能像污渍或多余器官。 */
+
+    const hs = a.hScale || 1;
+    const headTop = fy - 30 * scale * hs;
+    const chin = headTop + 4.8 * scale;
+
+    if (a.extra === 'beard') {
+      // 络腮胡：脸颊下缘到下巴
+      ctx.fillStyle = shade(a.hairColor || '#2b1d14', -0.1);
+      ctx.beginPath();
+      ctx.ellipse(fx + facing * 0.3 * scale, chin - 1.1 * scale, 2.5 * scale, 1.5 * scale, 0, 0, Math.PI);
+      ctx.fill();
+    } else if (a.extra === 'stubble') {
+      // 胡茬：一层半透明的青灰
+      ctx.fillStyle = 'rgba(30,32,38,0.30)';
+      ctx.beginPath();
+      ctx.ellipse(fx + facing * 0.3 * scale, chin - 1.4 * scale, 2.2 * scale, 1.3 * scale, 0, 0, Math.PI);
+      ctx.fill();
+    } else if (a.extra === 'earring') {
+      // 耳环：侧面一点金属光
+      px(fx + facing * 2.9 * scale, headTop + 3.1 * scale, '#d8c060', Math.max(1, scale * 0.7));
+    } else if (a.extra === 'scar') {
+      // 旧疤：一道浅色斜线
+      rect(fx + facing * 1.7 * scale, headTop + 2.4 * scale, 0.5 * scale, 2.0 * scale, 'rgba(226,200,196,0.55)');
+    } else if (a.extra === 'suit') {
+      // 西装：躯干中间一条领带 + 更暗的翻领
+      const sy = fy - 30 * scale * hs * 0.33 - 30 * scale * hs * 0.42;
+      const th = 30 * scale * hs * 0.33;
+      rect(fx - 0.6 * scale, sy + 1.4 * scale, 1.3 * scale, th * 0.72, '#5a1f26');
+      rect(fx - 2.4 * scale, sy + 1, 2.0 * scale, th * 0.9, shade(a.coatColor, -0.22));
+      rect(fx + 0.4 * scale, sy + 1, 2.0 * scale, th * 0.9, shade(a.coatColor, -0.22));
+    } else if (a.extra === 'scarf') {
+      // 围巾：绕在脖子上、压着肩线，垂下一截 —— 刻意画低，不挡嘴
+      const sy = fy - 30 * scale * hs * 0.33 - 30 * scale * hs * 0.42;
+      rect(fx - 3.2 * scale, sy - 0.2 * scale, 6.4 * scale, 1.5 * scale, '#7a3a34');
+      rect(fx - 3.2 * scale, sy - 0.2 * scale, 6.4 * scale, 0.5 * scale, '#8d4740');
+      rect(fx - facing * 1.1 * scale, sy + 1.0 * scale, 1.6 * scale, 4.0 * scale, '#6b322d');
+    } else if (a.extra === 'apron') {
+      // 围裙：胸前一块浅色
+      const sy = fy - 30 * scale * hs * 0.33 - 30 * scale * hs * 0.42;
+      const th = 30 * scale * hs * 0.33;
+      rect(fx - 2.8 * scale, sy + 3.2 * scale, 5.6 * scale, th * 0.8, '#8e8a80');
+    } else if (a.extra === 'nametag') {
+      // 工牌：左胸一个小亮块
+      const sy = fy - 30 * scale * hs * 0.33 - 30 * scale * hs * 0.42;
+      rect(fx + facing * 0.9 * scale, sy + 3.6 * scale, 2.0 * scale, 2.6 * scale, '#c8d4e0');
+      rect(fx + facing * 0.9 * scale, sy + 3.6 * scale, 2.0 * scale, 0.8 * scale, '#3a5a86');
     }
   }
 
@@ -528,7 +612,8 @@ const Cameras = (() => {
      场 景 绘 制
      ═══════════════════════════════════════════════════════ */
 
-  function bgGate() {
+  function bgGate(vis) {
+    const t = (vis && vis.time) || 0;
     // 天空
     ctx.fillStyle = grad(0, 0, 0, 46, [[0, SKY], [1, SKY2]]);
     ctx.fillRect(0, 0, W, 46);
@@ -537,6 +622,9 @@ const Cameras = (() => {
     ctx.fillStyle = '#dfe8f0';
     ctx.beginPath(); ctx.arc(140, 13, 4.4, 0, Math.PI * 2); ctx.fill();
     glow(140, 13, 16, 'rgba(200,220,240,0.35)', 0.5);
+
+    // 对面楼里有一扇窗的灯灭了（随机事件）
+    const darkWin = vis && vis.windowOut ? [138 + 6, 22 + 6] : null;
 
     // 远处楼房
     const blocks = [[4, 30, 16, 16], [22, 24, 13, 22], [37, 33, 11, 13],
@@ -547,6 +635,7 @@ const Cameras = (() => {
       // 亮着的窗
       for (let wy = b[1] + 2; wy < b[1] + b[3] - 2; wy += 4) {
         for (let wx = b[0] + 2; wx < b[0] + b[2] - 2; wx += 4) {
+          if (darkWin && Math.abs(wx - darkWin[0]) < 2 && Math.abs(wy - darkWin[1]) < 2) continue;
           if (Math.random() < 0.62) {
             rect(wx, wy, 1.6, 2, Math.random() < 0.25 ? '#f0d488' : '#5d7385');
           }
@@ -576,6 +665,15 @@ const Cameras = (() => {
     rect(26, 18, 10, 3, '#333a42');
     glow(31, 21, 22, 'rgba(255,225,160,0.30)', 0.55);
     rect(28, 20, 6, 1.4, LIGHT);
+
+    // 单元门上的对讲机在响（随机事件）：门牌左边那块小面板
+    if (vis && vis.intercom) {
+      const on = (Math.sin(t * 11) + 1) * 0.5;
+      const a = (0.35 + on * 0.55).toFixed(3);
+      rect(62, 50, 5, 4, '#39414b');
+      rect(62.6, 50.6, 3.8, 2.8, 'rgba(230,90,90,' + a + ')');
+      glow(64.5, 52, 13, 'rgba(255,90,90,' + (0.08 + on * 0.20).toFixed(3) + ')', 0.6);
+    }
   }
 
   function drawEntrance() {
@@ -611,7 +709,11 @@ const Cameras = (() => {
     rect(62, 81, 46, 2.4, '#252b31');
   }
 
-  function bgLobby() {
+  function bgLobby(vis) {
+    const t = (vis && vis.time) || 0;
+    const flick = vis && vis.flicker ? (0.72 + 0.28 * Math.sin(t * 23) * Math.sin(t * 7.3)) : 1;
+    // 电梯轿厢现在停在哪一层：跟着"最近一次有人去的那层"走，没人按过就停在一层
+    const lobbyFloor = String(Math.max(1, Math.min(18, (vis && vis.elevatorAt) || 1))) + 'F';
     // 远墙
     rect(0, 0, W, H, '#151a20');
     rect(38, 18, 94, 52, WALL_A);
@@ -639,12 +741,18 @@ const Cameras = (() => {
     rect(58, 22, 26, 48, METAL_D);
     rect(59, 23, 24, 46, '#2f3740');
     rect(60, 24, 22, 44, '#3a434d');
-    rect(70.5, 24, 1, 44, METAL_D);
-    // 电梯指示灯
+    // 电梯门开着一条缝，里面没人（随机事件）
+    if (vis && vis.elevatorDoor) {
+      rect(70.5, 24, 2.6, 44, '#0a0d10');
+      glow(71.8, 46, 12, 'rgba(150,180,215,0.18)', 0.5);
+    } else {
+      rect(70.5, 24, 1, 44, METAL_D);
+      // 门缝光
+      rect(70.8, 24, 0.5, 44, '#1a1f25');
+    }
+    // 电梯指示灯：电梯停在哪一层
     rect(66, 19, 10, 4, '#14181d');
-    text('1F', 69.4, 19.4, '#7ef0a8', 4);
-    // 门缝光
-    rect(70.8, 24, 0.5, 44, '#1a1f25');
+    text(lobbyFloor, 69.4, 19.4, '#7ef0a8', 4);
 
     // 楼梯口
     rect(100, 26, 22, 44, '#12161b');
@@ -659,7 +767,7 @@ const Cameras = (() => {
     [[62, 6], [85, 6], [108, 6]].forEach(p => {
       rect(p[0], p[1], 6, 2, '#3a424a');
       rect(p[0] + 0.5, p[1] + 2, 5, 1, LIGHT);
-      glow(p[0] + 3, p[1] + 4, 18, 'rgba(255,232,170,0.22)', 0.55);
+      glow(p[0] + 3, p[1] + 4, 18, 'rgba(255,232,170,' + (0.22 * flick).toFixed(3) + ')', 0.55);
     });
 
     // 前台
@@ -676,7 +784,10 @@ const Cameras = (() => {
     text('温 岸 公 寓', 60, 10, '#4d5866', 6);
   }
 
-  function bgStair() {
+  function bgStair(elev, vis) {
+    const t = (vis && vis.time) || 0;
+    // 灯闪：整层亮度抖一下
+    const flick = vis && vis.flicker ? (0.45 + 0.55 * Math.abs(Math.sin(t * 17)) * Math.abs(Math.sin(t * 5.1))) : 1;
     rect(0, 0, W, H, '#0b0e12');
 
     // 三层楼梯口，越远越暗
@@ -701,7 +812,7 @@ const Cameras = (() => {
       // 顶层灯
       if (idx === 0) {
         rect(L.x + 8, L.y + 2, 8, 2, LIGHT);
-        glow(L.x + 12, L.y + 5, 22, 'rgba(255,230,160,0.22)', 0.6);
+        glow(L.x + 12, L.y + 5, 22, 'rgba(255,230,160,' + (0.22 * flick).toFixed(3) + ')', 0.6);
       }
       if (idx === 2) {
         glow(L.x + L.w / 2, L.y + L.h / 2, 12, 'rgba(120,160,200,0.15)', 0.5);
@@ -722,9 +833,20 @@ const Cameras = (() => {
       rect(4 + Math.random() * 12, 10 + Math.random() * 60, 1 + Math.random() * 3, 2 + Math.random() * 10,
            'rgba(30,26,22,0.5)');
     }
+
+    // 电梯井：厢体上行时，楼梯间这侧的墙上会亮一道、暗一道（走廊那头看不见厢体本身）
+    if (elev) {
+      const p = clamp(elev, 0, 1);
+      const sx = 126, sy = 20 + (1 - p) * 56, sh = 9;
+      glow(sx + 20, sy + sh / 2, 26, 'rgba(150,195,235,' + (0.10 + p * 0.16).toFixed(3) + ')', 0.75);
+      glow(sx + 20, sy + sh / 2, 11, 'rgba(190,225,255,' + (0.18 + p * 0.22).toFixed(3) + ')', 0.8);
+      rect(sx + 24, sy - 6, 1, sh + 12, 'rgba(160,210,255,0.22)');
+    }
   }
 
-  function bgCorridor(targetFloor, showFloor) {
+  function bgCorridor(targetFloor, showFloor, vis) {
+    const t = (vis && vis.time) || 0;
+    const flick = vis && vis.flicker ? (0.68 + 0.32 * Math.sin(t * 19) * Math.sin(t * 6.1)) : 1;
     rect(0, 0, W, H, '#12161c');
 
     // 走廊尽头
@@ -743,17 +865,17 @@ const Cameras = (() => {
     ctx.fillStyle = '#1c2229';
     ctx.beginPath(); ctx.moveTo(W, 0); ctx.lineTo(122, 26); ctx.lineTo(122, 70); ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
 
-    // 两侧住户门（近大远小）
-    const floorNo = String(showFloor || targetFloor || 8).padStart(2, '0');
+    // 这一层的门牌号：楼层两位 + 房位两位（0301 … 1804），跟登记册完全同一套编号
+    // 楼层由 game.js 传入，且只在换访客时变 —— 不会自己乱跳
+    const fl = Math.max(3, Math.min(18, showFloor || targetFloor || 8));
+    const floorNo = String(fl).padStart(2, '0');
     const doors = [
-      { y: 30, h: 40, w: 13, x: 4,   n: '1' },
-      { y: 32, h: 34, w: 11, x: 21,  n: '2' },
-      { y: 34, h: 28, w: 9,  x: 34,  n: '3' },
-      { y: 30, h: 40, w: 13, x: 153, n: '4' },
-      { y: 32, h: 34, w: 11, x: 138, n: '5' },
-      { y: 34, h: 28, w: 9,  x: 127, n: '6' },
+      { y: 30, h: 40, w: 13, x: 4,   n: '01', side: 'L' },
+      { y: 33, h: 31, w: 10, x: 22,  n: '02', side: 'L' },
+      { y: 33, h: 31, w: 10, x: 130, n: '03', side: 'R' },
+      { y: 30, h: 40, w: 13, x: 153, n: '04', side: 'R' },
     ];
-    doors.forEach((d, i) => {
+    doors.forEach(d => {
       rect(d.x, d.y, d.w, d.h, DOOR);
       rect(d.x, d.y, d.w, 1.4, '#4a3830');
       rect(d.x + d.w - 1.6, d.y + 1.4, 1.6, d.h - 1.4, DOOR_D);
@@ -761,31 +883,52 @@ const Cameras = (() => {
       const roomNo = floorNo + d.n;
       rect(d.x + 1, d.y + 5, 5, 3.4, '#c9c2a8');
       text(roomNo, d.x + 1.2, d.y + 5.4, '#2a2418', 4);
-      // 门把手
-      rect(i < 3 ? d.x + d.w - 3 : d.x + 1.4, d.y + d.h * 0.55, 1.4, 1.4, '#9aa2ab');
+      // 门把手（靠走廊中央那侧）
+      rect(d.side === 'L' ? d.x + d.w - 3 : d.x + 1.4, d.y + d.h * 0.55, 1.4, 1.4, '#9aa2ab');
     });
+
+    // 有一扇门开着一条缝，门里的灯亮着（随机事件）
+    if (vis && vis.ajar) {
+      const d = doors[1];
+      const gapW = 2.4;
+      const gx = d.side === 'L' ? d.x + d.w - gapW : d.x;
+      rect(gx, d.y + 1.4, gapW, d.h - 1.4, '#0c1014');
+      const warm = 0.30 + 0.10 * Math.sin(t * 1.7);
+      rect(gx + (d.side === 'L' ? -1.6 : gapW + 0.2), d.y + 3, 1.6, d.h - 5,
+           'rgba(255,224,160,' + warm.toFixed(3) + ')');
+      glow(gx + gapW / 2, d.y + d.h * 0.5, 16, 'rgba(255,224,160,0.16)', 0.55);
+    }
 
     // 电梯（远端左侧）
     rect(50, 30, 14, 38, METAL_D);
     rect(51, 31, 12, 36, '#313a44');
     rect(56.8, 31, 0.8, 36, METAL_D);
     rect(53, 27, 8, 3, '#14181d');
-    text(String('1'), 55.6, 27.3, '#7ef0a8', 4);
+    text(floorNo, 54.2, 27.3, '#7ef0a8', 4);
 
     // 楼层指示牌
     rect(96, 30, 24, 11, '#141a20');
     rect(97, 31, 22, 9, '#1d242b');
-    text('F ' + (showFloor || targetFloor), 100, 32.6, '#cfe0ef', 6);
+    text('F ' + fl, 100, 32.6, '#cfe0ef', 6);
 
     // 楼梯门
     rect(104, 44, 14, 24, '#1b2028');
-    text('安全出口', 104.6, 45.4, '#4d5866', 3.4);
+    // 安全出口的绿灯在不该亮的时候亮了一下（随机事件）。
+    // 标签只画一处：事件生效时挪到亮起来的那条绿带上，避免两行字叠在一起。
+    if (vis && vis.exitPulse) {
+      const a = 0.35 + 0.45 * Math.abs(Math.sin(t * 3.4));
+      glow(111, 41, 15, 'rgba(110,242,160,' + (a * 0.45).toFixed(3) + ')', 0.6);
+      rect(105, 39.6, 12, 3.4, 'rgba(110,242,160,' + (a * 0.7).toFixed(3) + ')');
+      text('安全出口', 104.6, 40.2, '#dfe7f0', 3.4);
+    } else {
+      text('安全出口', 104.6, 45.4, '#4d5866', 3.4);
+    }
 
     // 顶灯
     [[30, 4], [85, 4], [140, 4]].forEach((p, i) => {
       rect(p[0], p[1], 8, 2, '#3a424a');
       rect(p[0] + 0.5, p[1] + 2, 7, 1, i === 1 ? LIGHT : '#8a8468');
-      glow(p[0] + 4, p[1] + 4, 16, 'rgba(255,232,170,0.16)', 0.5);
+      glow(p[0] + 4, p[1] + 4, 16, 'rgba(255,232,170,' + (0.16 * flick).toFixed(3) + ')', 0.5);
     });
   }
 
@@ -818,10 +961,10 @@ const Cameras = (() => {
 
     // 背景
     switch (scene.cam) {
-      case 'gate':   bgGate(); break;
-      case 'lobby':  bgLobby(); break;
-      case 'stair':  bgStair(); break;
-      case 'lobby2': bgCorridor(scene.targetFloor || 8, scene.showFloor || 0); break;
+      case 'gate':   bgGate(scene.visual); break;
+      case 'lobby':  bgLobby(scene.visual); break;
+      case 'stair':  bgStair(scene.elevator || 0, scene.visual); break;
+      case 'lobby2': bgCorridor(scene.targetFloor || 8, scene.showFloor || 0, scene.visual); break;
       default:       rect(0, 0, W, H, '#101317');
     }
 
@@ -851,6 +994,12 @@ const Cameras = (() => {
     // 摄像机色调
     if (scene.cam === 'gate') {
       ctx.fillStyle = 'rgba(30,60,110,0.10)';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // 随机事件造成的整体偏色（只影响画面观感，不影响判定信息）
+    if (scene.tint) {
+      ctx.fillStyle = scene.tint;
       ctx.fillRect(0, 0, W, H);
     }
 

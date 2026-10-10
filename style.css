@@ -172,11 +172,16 @@ main{
   box-shadow:0 0 12px rgba(110,242,160,.1) inset;
 }
 .cam-btn.active .num{color:var(--green-dim)}
-.cam-btn .alert{
+/* 这个通道现在有动静：大门外有人、或者楼里出了什么事。
+   注意：alert 是加在 .cam-btn 自己身上的，所以小点得用伪元素画，
+   原来写成 `.cam-btn .alert`（后代选择器）是永远匹配不到的。 */
+.cam-btn.alert::after{
+  content:"";
   position:absolute;right:7px;top:50%;transform:translateY(-50%);
   width:7px;height:7px;border-radius:50%;background:var(--red);
   box-shadow:0 0 8px var(--red);animation:pulse 1s infinite;
 }
+.cam-btn.active.alert::after{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .cam-btn .nobody{
   position:absolute;right:8px;top:50%;transform:translateY(-50%);
   font-family:var(--mono);font-size:8px;color:var(--txt-faint);letter-spacing:1px;
@@ -232,12 +237,13 @@ main{
     rgba(0,0,0,0) 1px,
     rgba(0,0,0,0) 3px);
   mix-blend-mode:multiply;
-  opacity:.75;
+  opacity:var(--scanline-op,.75);
 }
 
 #vignette{
   position:absolute;inset:0;pointer-events:none;
   background:radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(0,0,0,.82) 100%);
+  opacity:var(--vignette-op,1);
 }
 
 #screen-ui{position:absolute;inset:0;pointer-events:none;font-family:var(--mono)}
@@ -269,7 +275,7 @@ main{
   opacity:0;background-repeat:repeat;background-size:170px 96px;
   mix-blend-mode:screen;
 }
-#noise-overlay.on{opacity:.55}
+#noise-overlay.on{opacity:var(--noise-op,.55)}
 
 #glitch-bar{
   position:absolute;left:0;right:0;height:0;pointer-events:none;
@@ -530,6 +536,79 @@ tr.row-match td.room{color:var(--blue);font-weight:700}
   display:flex;align-items:center;justify-content:center;
 }
 #scare-canvas{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+
+/* ─────────── 调试面板（F1 / ~ 开关） ─────────── */
+
+#debug{
+  position:fixed;left:12px;bottom:12px;z-index:200;
+  width:300px;max-height:calc(100vh - 24px);display:flex;flex-direction:column;
+  background:linear-gradient(180deg,rgba(14,18,24,.97),rgba(9,12,16,.97));
+  border:1px solid #2b3a4a;border-radius:4px;
+  box-shadow:0 18px 50px rgba(0,0,0,.85), 0 0 0 1px #000;
+  font-family:var(--mono);color:var(--txt-dim);
+}
+#debug.hidden{display:none}
+
+.dbg-head{
+  display:flex;align-items:center;gap:8px;flex:none;
+  padding:7px 10px;border-bottom:1px solid var(--line);
+  background:#111823;
+}
+.dbg-head b{font-family:var(--cjk);font-size:11.5px;color:var(--amber);letter-spacing:2px;font-weight:400}
+.dbg-hint{font-size:9px;color:var(--txt-faint);margin-left:auto}
+#dbg-close{
+  background:none;border:1px solid var(--line);color:var(--txt-dim);
+  width:18px;height:18px;line-height:1;border-radius:2px;cursor:pointer;font-size:13px;padding:0;
+}
+#dbg-close:hover{border-color:var(--red);color:var(--red)}
+
+.dbg-body{overflow-y:auto;padding:8px 10px 10px}
+
+.dbg-sec{margin-bottom:11px}
+.dbg-sec:last-child{margin-bottom:0}
+.dbg-title{
+  font-family:var(--cjk);font-size:9.5px;color:var(--txt-faint);letter-spacing:1.6px;
+  margin-bottom:5px;padding-bottom:3px;border-bottom:1px solid #1b222b;
+}
+.dbg-title b{color:var(--green);font-family:var(--mono);font-size:11px}
+
+.dbg-row{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-bottom:4px}
+.dbg-lbl{font-family:var(--cjk);font-size:9.5px;color:var(--txt-faint);flex:none;min-width:46px}
+.dbg-val{font-size:9.5px;color:var(--green);margin-left:auto}
+.dbg-out{
+  margin:4px 0 0;padding:5px 6px;max-height:132px;overflow-y:auto;
+  background:#080b0e;border:1px solid #171d24;border-radius:2px;
+  font-family:var(--mono);font-size:9.5px;line-height:1.5;color:#8fa0b0;white-space:pre-wrap;
+}
+.dbg-out b{color:var(--amber);font-weight:400}
+.dbg-out .k{color:#5f6d7d}
+.dbg-out .bad{color:var(--red)}
+.dbg-out .good{color:var(--green)}
+
+#debug button{
+  font-family:var(--cjk);font-size:10.5px;color:var(--txt-dim);
+  background:#151b23;border:1px solid var(--line);border-radius:2px;
+  padding:3px 8px;cursor:pointer;transition:.12s;
+}
+#debug button:hover{background:#1d2632;color:var(--txt);border-color:#3a4756}
+#debug button.on{background:#0f1d17;color:var(--green);border-color:var(--green-dim)}
+#debug button.danger:hover{border-color:var(--red);color:var(--red)}
+
+#debug input[type=range]{
+  flex:1;min-width:80px;height:12px;-webkit-appearance:none;appearance:none;
+  background:transparent;cursor:pointer;
+}
+#debug input[type=range]::-webkit-slider-runnable-track{
+  height:3px;background:#232c36;border-radius:2px;
+}
+#debug input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;width:10px;height:10px;margin-top:-3.5px;
+  border-radius:50%;background:var(--green-dim);border:1px solid #0a0f0c;
+}
+#debug input[type=range]::-moz-range-track{height:3px;background:#232c36;border-radius:2px}
+#debug input[type=range]::-moz-range-thumb{
+  width:10px;height:10px;border-radius:50%;background:var(--green-dim);border:1px solid #0a0f0c;
+}
 
 /* ─────────── 滚动条 ─────────── */
 

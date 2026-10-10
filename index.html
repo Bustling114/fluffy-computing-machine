@@ -147,10 +147,117 @@
   <canvas id="scare-canvas" width="680" height="384"></canvas>
 </div>
 
+<!-- ════════════════════════════════════════════════════════
+     调试面板（F1 或 ~ 开关；?debug=1 开局就展开）
+     正常游玩时它是关着的，也不吃键盘
+     ════════════════════════════════════════════════════════ -->
+<div id="debug" class="hidden">
+  <div class="dbg-head">
+    <b>调试面板</b>
+    <span class="dbg-hint">F1 / ~ 开关</span>
+    <button id="dbg-close" type="button">×</button>
+  </div>
+
+  <div class="dbg-body">
+
+    <div class="dbg-sec">
+      <div class="dbg-title">本夜 <b id="dbg-night">—</b></div>
+      <div class="dbg-row" id="dbg-jump"></div>
+      <div class="dbg-row">
+        <button data-dbg="skip" type="button">跳到交班</button>
+        <button data-dbg="restart" type="button">重开</button>
+      </div>
+    </div>
+
+    <div class="dbg-sec">
+      <div class="dbg-title">时间</div>
+      <div class="dbg-row">
+        <button data-dbg="speed" data-v="0.5" type="button">0.5×</button>
+        <button data-dbg="speed" data-v="1" type="button">1×</button>
+        <button data-dbg="speed" data-v="3" type="button">3×</button>
+        <button data-dbg="speed" data-v="8" type="button">8×</button>
+        <button data-dbg="speed" data-v="25" type="button">25×</button>
+      </div>
+      <div class="dbg-row">
+        <button data-dbg="pause" type="button">暂停 / 继续</button>
+        <span class="dbg-val" id="dbg-speed">1×</span>
+      </div>
+    </div>
+
+    <div class="dbg-sec">
+      <div class="dbg-title">访客</div>
+      <div class="dbg-row">
+        <button data-dbg="spawn" type="button">立刻叫一个</button>
+        <button data-dbg="let" type="button">放行</button>
+        <button data-dbg="deny" type="button">拒收</button>
+      </div>
+      <div class="dbg-row">
+        <button data-dbg="autolevel" type="button">自动判定 ×10</button>
+      </div>
+      <div class="dbg-row">
+        <button data-dbg="reveal" type="button">揭示真身</button>
+      </div>
+      <pre id="dbg-visitor" class="dbg-out">还没有访客。</pre>
+    </div>
+
+    <div class="dbg-sec">
+      <div class="dbg-title">概率（本局有效）</div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">假货率</span>
+        <input id="dbg-bug" type="range" min="0" max="1" step="0.02" value="0.5">
+        <span class="dbg-val" id="dbg-bug-v">—</span>
+      </div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">双层突变</span>
+        <input id="dbg-dbl" type="range" min="0" max="1" step="0.02" value="0.2">
+        <span class="dbg-val" id="dbg-dbl-v">—</span>
+      </div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">诱饵率</span>
+        <input id="dbg-decoy" type="range" min="0" max="1" step="0.02" value="0.34">
+        <span class="dbg-val" id="dbg-decoy-v">—</span>
+      </div>
+    </div>
+
+    <div class="dbg-sec">
+      <div class="dbg-title">设施内随机事件</div>
+      <div class="dbg-row">
+        <button data-dbg="evtoggle" type="button">开 / 关</button>
+        <button data-dbg="evnow" type="button">立刻来一个</button>
+        <span class="dbg-val" id="dbg-ev">—</span>
+      </div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">间隔 (秒)</span>
+        <input id="dbg-evrate" type="range" min="2" max="60" step="1" value="16">
+        <span class="dbg-val" id="dbg-evrate-v">—</span>
+      </div>
+      <pre id="dbg-evlog" class="dbg-out">（还没有事件）</pre>
+    </div>
+
+    <div class="dbg-sec">
+      <div class="dbg-title">画面</div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">扫描线</span>
+        <input id="dbg-scan" type="range" min="0" max="1" step="0.05" value="0.75">
+      </div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">暗角</span>
+        <input id="dbg-vig" type="range" min="0" max="1" step="0.05" value="1">
+      </div>
+      <div class="dbg-row">
+        <span class="dbg-lbl">噪点</span>
+        <input id="dbg-noise" type="range" min="0" max="1" step="0.05" value="0.5">
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <script src="js/audio.js"></script>
 <script src="js/visitor.js"></script>
 <script src="js/camera.js"></script>
 <script src="js/registry.js"></script>
+<script src="js/events.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>
